@@ -1,114 +1,93 @@
 const express = require('express');
 const { db, newId } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
 
-// Reporte de movimientos, con filtros opcionales por tipo, usuario y merma.
-// Siempre acotado al cliente del token — nunca a lo que venga en la query.
+const UNIDADES = ['unidad', 'caja'];
+
 router.get('/', (req, res) => {
-  const { tipo, usuarioId, soloMerma } = req.query;
-  let sql = `
-    SELECT m.fecha, m.tipo, u.nombre AS usuario, p.nombre AS producto, p.unidad,
-           mi.cantidad, mi.observacion_merma
-    FROM movimiento_items mi
-    JOIN movimientos m ON m.id = mi.movimiento_id
-    JOIN usuarios u ON u.id = m.usuario_id
-    JOIN productos p ON p.id = mi.producto_id
-    WHERE m.cliente_id = ?
-  `;
-  const params = [req.user.clienteId];
-
-  if (tipo) { sql += ' AND m.tipo = ?'; params.push(tipo); }
-  if (usuarioId) { sql += ' AND m.usuario_id = ?'; params.push(usuarioId); }
-  if (soloMerma === 'true') { sql += " AND mi.observacion_merma IS NOT NULL AND mi.observacion_merma != ''"; }
-  sql += ' ORDER BY m.fecha DESC';
-
-  res.json(db.prepare(sql).all(...params));
+  const filas = db.prepare('SELECT * FROM productos WHERE cliente_id = ? ORDER BY nombre').all(req.user.clienteId);
+  res.json(filas);
 });
 
-// Registrar un despacho a cliente o un abastecimiento a la tienda principal:
-// ambos restan stock. items: [{ productoId, cantidad, observacionMerma }]
-router.post('/salida', (req, res) => {
-  const { tipo, items } = req.body;
-  if (!['despacho', 'abastecimiento'].includes(tipo) || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'Indica un tipo válido y al menos un ítem.' });
+router.post('/', requireRole('admin'), (req, res) => {
+  const { sku, nombre, categoria, unidad, precio, stockInicial } = req.body;
+  if (!nombre || !UNIDADES.includes(unidad)) {
+    return res.status(400).json({ error: `Falta el nombre o la unidad debe ser una de: ${UNIDADES.join(', ')}.` });
   }
-
-  try {
-    const movimientoId = registrarMovimiento(req.user.clienteId, req.user.sub, tipo, items, { validarStock: true });
-    res.status(201).json({ id: movimientoId });
-  } catch (err) {
-    res.status(409).json({ error: err.message });
-  }
+  const id = newId();
+  db.prepare(
+    `INSERT INTO productos (id, cliente_id, sku, nombre, categoria, unidad, precio, stock_actual)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, req.user.clienteId, sku || null, nombre, categoria || null, unidad, precio || 0, stockInicial || 0);
+  res.status(201).json({ id });
 });
 
-// Registrar un ingreso de mercadería: suma stock. Si un ítem trae
-// productoNuevo en vez de productoId, primero crea el producto en el
-// catálogo del cliente y luego usa ese id.
-router.post('/ingreso', (req, res) => {
+router.put('/:id', requireRole('admin'), (req, res) => {
+  const { nombre, categoria, unidad, precio } = req.body;
+  const resultado = db
+    .prepare(
+      `UPDATE productos SET nombre = ?, categoria = ?, unidad = ?, precio = ?
+       WHERE id = ? AND cliente_id = ?`
+    )
+    .run(nombre, categoria, unidad, precio, req.params.id, req.user.clienteId);
+  if (resultado.changes === 0) return res.status(404).json({ error: 'Producto no encontrado en tu catálogo.' });
+  res.json({ ok: true });
+});
+
+router.delete('/:id', requireRole('admin'), (req, res) => {
+  const resultado = db
+    .prepare('DELETE FROM productos WHERE id = ? AND cliente_id = ?')
+    .run(req.params.id, req.user.clienteId);
+  if (resultado.changes === 0) return res.status(404).json({ error: 'Producto no encontrado en tu catálogo.' });
+  res.status(204).end();
+});
+
+// Importación masiva desde Excel/CSV/PDF: el archivo se parsea en el
+// navegador (con SheetJS o pdf.js) y aquí solo llega la lista ya
+// estructurada. Si el SKU o el nombre ya existen para este cliente, se
+// actualiza ese producto; si no, se crea uno nuevo. Todo en una sola
+// transacción para no dejar una importación a medias si algo falla.
+router.post('/importar', requireRole('admin'), (req, res) => {
   const { items } = req.body;
   if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'Agrega al menos un ítem a la carga.' });
+    return res.status(400).json({ error: 'Envía al menos un producto para importar.' });
+  }
+  if (!items.every((it) => typeof it.nombre === 'string' && it.nombre.trim())) {
+    return res.status(400).json({ error: 'Cada fila necesita al menos un nombre de producto.' });
   }
 
-  const resolverItems = db.transaction(() => {
-    return items.map((it) => {
-      if (it.productoId) return it;
-      const { nombre, unidad } = it.productoNuevo || {};
-      if (!nombre || !unidad) throw new Error('Cada producto nuevo necesita nombre y unidad.');
-      const productoId = newId();
-      db.prepare(
-        `INSERT INTO productos (id, cliente_id, nombre, unidad, precio, stock_actual)
-         VALUES (?, ?, ?, ?, 0, 0)`
-      ).run(productoId, req.user.clienteId, nombre, unidad);
-      return { ...it, productoId };
-    });
-  });
-
-  try {
-    const itemsResueltos = resolverItems();
-    const movimientoId = registrarMovimiento(req.user.clienteId, req.user.sub, 'ingreso', itemsResueltos, { validarStock: false });
-    res.status(201).json({ id: movimientoId });
-  } catch (err) {
-    res.status(409).json({ error: err.message });
-  }
-});
-
-// Crea el movimiento, sus líneas, y ajusta el stock — todo en una sola
-// transacción: si algo falla (ej. stock insuficiente), no queda nada a medias.
-function registrarMovimiento(clienteId, usuarioId, tipo, items, { validarStock }) {
-  const signo = tipo === 'ingreso' ? 1 : -1;
+  let creados = 0;
+  let actualizados = 0;
 
   const ejecutar = db.transaction(() => {
-    const movimientoId = newId();
-    db.prepare('INSERT INTO movimientos (id, cliente_id, usuario_id, tipo) VALUES (?, ?, ?, ?)').run(
-      movimientoId, clienteId, usuarioId, tipo
-    );
+    for (const it of items) {
+      const unidad = UNIDADES.includes(it.unidad) ? it.unidad : 'unidad';
+      const existente = it.sku
+        ? db.prepare('SELECT id FROM productos WHERE cliente_id = ? AND sku = ?').get(req.user.clienteId, it.sku)
+        : db.prepare('SELECT id FROM productos WHERE cliente_id = ? AND lower(nombre) = lower(?)').get(req.user.clienteId, it.nombre);
 
-    for (const item of items) {
-      const producto = db
-        .prepare('SELECT * FROM productos WHERE id = ? AND cliente_id = ?')
-        .get(item.productoId, clienteId);
-      if (!producto) throw new Error(`Producto no encontrado en tu catálogo: ${item.productoId}`);
-
-      const nuevoStock = producto.stock_actual + signo * item.cantidad;
-      if (validarStock && nuevoStock < 0) {
-        throw new Error(`Stock insuficiente para "${producto.nombre}" (disponible: ${producto.stock_actual}).`);
+      if (existente) {
+        db.prepare(
+          `UPDATE productos SET nombre = ?, categoria = ?, unidad = ?,
+             precio = COALESCE(?, precio), stock_actual = ?
+           WHERE id = ? AND cliente_id = ?`
+        ).run(it.nombre, it.categoria || null, unidad, it.precio || null, it.stock || 0, existente.id, req.user.clienteId);
+        actualizados++;
+      } else {
+        db.prepare(
+          `INSERT INTO productos (id, cliente_id, sku, nombre, categoria, unidad, precio, stock_actual)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(newId(), req.user.clienteId, it.sku || null, it.nombre, it.categoria || null, unidad, it.precio || 0, it.stock || 0);
+        creados++;
       }
-
-      db.prepare('UPDATE productos SET stock_actual = ? WHERE id = ?').run(nuevoStock, producto.id);
-      db.prepare(
-        `INSERT INTO movimiento_items (id, movimiento_id, producto_id, cantidad, observacion_merma)
-         VALUES (?, ?, ?, ?, ?)`
-      ).run(newId(), movimientoId, producto.id, item.cantidad, item.observacionMerma || null);
     }
-
-    return movimientoId;
   });
+  ejecutar();
 
-  return ejecutar();
-}
+  res.status(200).json({ creados, actualizados });
+});
 
 module.exports = router;
