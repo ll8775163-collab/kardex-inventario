@@ -1,93 +1,65 @@
 const express = require('express');
-const { db, newId } = require('../db');
+const { pool, newId } = require('../db');
+const { hashPassword } = require('../auth');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
 
-const UNIDADES = ['unidad', 'caja'];
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-router.get('/', (req, res) => {
-  const filas = db.prepare('SELECT * FROM productos WHERE cliente_id = ? ORDER BY nombre').all(req.user.clienteId);
-  res.json(filas);
-});
+// Lista los usuarios del cliente que está haciendo la petición — nunca de
+// otro cliente, aunque alguien intente pasar otro id por la URL o el body.
+router.get('/', ah(async (req, res) => {
+  const { rows } = await pool.query(
+    'SELECT id, nombre, usuario, rol FROM usuarios WHERE cliente_id = $1',
+    [req.user.clienteId]
+  );
+  res.json(rows);
+}));
 
-router.post('/', requireRole('admin'), (req, res) => {
-  const { sku, nombre, categoria, unidad, precio, stockInicial } = req.body;
-  if (!nombre || !UNIDADES.includes(unidad)) {
-    return res.status(400).json({ error: `Falta el nombre o la unidad debe ser una de: ${UNIDADES.join(', ')}.` });
+// Solo el admin de ese cliente puede crear almaceneros, y solo hasta 5.
+router.post('/', requireRole('admin'), ah(async (req, res) => {
+  const { nombre, usuario, password } = req.body;
+  if (!nombre || !usuario || !password || password.length < 8) {
+    return res.status(400).json({ error: 'Completa nombre, ID de usuario y una contraseña de al menos 8 caracteres.' });
   }
+
+  const { rows: existentes } = await pool.query('SELECT id FROM usuarios WHERE usuario = $1', [usuario.toLowerCase()]);
+  if (existentes.length > 0) {
+    return res.status(409).json({ error: 'Ese ID de usuario ya está en uso.' });
+  }
+
+  const { rows: conteo } = await pool.query(
+    "SELECT COUNT(*) AS total FROM usuarios WHERE cliente_id = $1 AND rol = 'almacenero'",
+    [req.user.clienteId]
+  );
+  if (parseInt(conteo[0].total, 10) >= 5) {
+    return res.status(409).json({ error: 'Ya existen 5 almaceneros registrados en esta cuenta.' });
+  }
+
   const id = newId();
-  db.prepare(
-    `INSERT INTO productos (id, cliente_id, sku, nombre, categoria, unidad, precio, stock_actual)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, req.user.clienteId, sku || null, nombre, categoria || null, unidad, precio || 0, stockInicial || 0);
-  res.status(201).json({ id });
-});
+  const passwordHash = await hashPassword(password);
+  await pool.query(
+    `INSERT INTO usuarios (id, cliente_id, nombre, usuario, password_hash, rol)
+     VALUES ($1, $2, $3, $4, $5, 'almacenero')`,
+    [id, req.user.clienteId, nombre, usuario.toLowerCase(), passwordHash]
+  );
 
-router.put('/:id', requireRole('admin'), (req, res) => {
-  const { nombre, categoria, unidad, precio } = req.body;
-  const resultado = db
-    .prepare(
-      `UPDATE productos SET nombre = ?, categoria = ?, unidad = ?, precio = ?
-       WHERE id = ? AND cliente_id = ?`
-    )
-    .run(nombre, categoria, unidad, precio, req.params.id, req.user.clienteId);
-  if (resultado.changes === 0) return res.status(404).json({ error: 'Producto no encontrado en tu catálogo.' });
-  res.json({ ok: true });
-});
+  res.status(201).json({ id, nombre, usuario: usuario.toLowerCase(), rol: 'almacenero' });
+}));
 
-router.delete('/:id', requireRole('admin'), (req, res) => {
-  const resultado = db
-    .prepare('DELETE FROM productos WHERE id = ? AND cliente_id = ?')
-    .run(req.params.id, req.user.clienteId);
-  if (resultado.changes === 0) return res.status(404).json({ error: 'Producto no encontrado en tu catálogo.' });
+// Eliminar un almacenero — verificando que pertenezca al mismo cliente que
+// hace la petición, para que un admin no pueda borrar usuarios ajenos.
+router.delete('/:id', requireRole('admin'), ah(async (req, res) => {
+  const resultado = await pool.query(
+    "DELETE FROM usuarios WHERE id = $1 AND cliente_id = $2 AND rol = 'almacenero'",
+    [req.params.id, req.user.clienteId]
+  );
+  if (resultado.rowCount === 0) {
+    return res.status(404).json({ error: 'Usuario no encontrado en tu cuenta.' });
+  }
   res.status(204).end();
-});
-
-// Importación masiva desde Excel/CSV/PDF: el archivo se parsea en el
-// navegador (con SheetJS o pdf.js) y aquí solo llega la lista ya
-// estructurada. Si el SKU o el nombre ya existen para este cliente, se
-// actualiza ese producto; si no, se crea uno nuevo. Todo en una sola
-// transacción para no dejar una importación a medias si algo falla.
-router.post('/importar', requireRole('admin'), (req, res) => {
-  const { items } = req.body;
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'Envía al menos un producto para importar.' });
-  }
-  if (!items.every((it) => typeof it.nombre === 'string' && it.nombre.trim())) {
-    return res.status(400).json({ error: 'Cada fila necesita al menos un nombre de producto.' });
-  }
-
-  let creados = 0;
-  let actualizados = 0;
-
-  const ejecutar = db.transaction(() => {
-    for (const it of items) {
-      const unidad = UNIDADES.includes(it.unidad) ? it.unidad : 'unidad';
-      const existente = it.sku
-        ? db.prepare('SELECT id FROM productos WHERE cliente_id = ? AND sku = ?').get(req.user.clienteId, it.sku)
-        : db.prepare('SELECT id FROM productos WHERE cliente_id = ? AND lower(nombre) = lower(?)').get(req.user.clienteId, it.nombre);
-
-      if (existente) {
-        db.prepare(
-          `UPDATE productos SET nombre = ?, categoria = ?, unidad = ?,
-             precio = COALESCE(?, precio), stock_actual = ?
-           WHERE id = ? AND cliente_id = ?`
-        ).run(it.nombre, it.categoria || null, unidad, it.precio || null, it.stock || 0, existente.id, req.user.clienteId);
-        actualizados++;
-      } else {
-        db.prepare(
-          `INSERT INTO productos (id, cliente_id, sku, nombre, categoria, unidad, precio, stock_actual)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        ).run(newId(), req.user.clienteId, it.sku || null, it.nombre, it.categoria || null, unidad, it.precio || 0, it.stock || 0);
-        creados++;
-      }
-    }
-  });
-  ejecutar();
-
-  res.status(200).json({ creados, actualizados });
-});
+}));
 
 module.exports = router;
