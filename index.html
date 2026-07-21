@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kardex — Sistema de inventario</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg:#F2F5F3;
+    --surface:#FFFFFF;
+    --surface-2:#E8EDE9;
+    --ink:#15231D;
+    --ink-soft:#5B6B63;
+    --line:#D7DED9;
+    --accent:#1E4335;
+    --accent-soft:#E1EBE4;
+    --accent-strong:#12291F;
+    --amber:#A9660E;
+    --amber-soft:#F8ECD9;
+    --red:#A83A32;
+    --red-soft:#F7E5E2;
+    --radius:10px;
+    --font-display:'Space Grotesk',sans-serif;
+    --font-body:'Inter',sans-serif;
+    --font-mono:'IBM Plex Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.5;}
+  h1,h2,h3{font-family:var(--font-display);font-weight:600;margin:0;letter-spacing:-0.01em;}
+  button{font-family:var(--font-body);cursor:pointer;}
+  input,select,textarea{font-family:var(--font-body);font-size:14px;}
+  a{color:inherit;}
+
+  /* ---- Login ---- */
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .login-card{width:380px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:32px;position:relative;}
+  .login-card::before{content:"";position:absolute;top:0;left:24px;width:2px;height:100%;background:repeating-linear-gradient(var(--line) 0 6px, transparent 6px 12px);opacity:.6;}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;}
+  .brand-mark{width:34px;height:34px;border-radius:8px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:13px;font-weight:500;}
+  .brand-name{font-family:var(--font-display);font-size:19px;font-weight:600;}
+  .brand-sub{font-size:11px;color:var(--ink-soft);font-family:var(--font-mono);letter-spacing:.04em;text-transform:uppercase;}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:6px;}
+  .field select,.field input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);}
+  .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 14px;font-size:13px;font-weight:500;color:var(--ink);transition:background .12s;}
+  .btn:hover{background:var(--surface-2);}
+  .btn:disabled{opacity:.55;cursor:default;}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn-primary:hover{background:var(--accent-strong);}
+  .btn-block{width:100%;}
+  .btn-danger{color:var(--red);}
+  .btn-ghost{border:none;background:transparent;padding:6px 8px;}
+
+  /* ---- Shell ---- */
+  .shell{display:flex;min-height:100vh;}
+  .sidebar{width:220px;flex-shrink:0;background:var(--accent-strong);color:#fff;display:flex;flex-direction:column;padding:20px 14px;}
+  .sidebar .brand{margin-bottom:32px;padding-left:4px;}
+  .sidebar .brand-name{color:#fff;font-size:17px;}
+  .sidebar .brand-sub{color:#ffffff99;}
+  .sidebar .brand-mark{background:#ffffff1a;}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:#ffffffb0;font-size:13.5px;font-weight:500;margin-bottom:2px;}
+  .nav-item.active{background:#ffffff14;color:#fff;}
+  .nav-item:hover{color:#fff;}
+  .sidebar-footer{margin-top:auto;padding-top:16px;border-top:1px solid #ffffff22;}
+  .user-chip{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#ffffffcc;margin-bottom:10px;}
+  .user-dot{width:24px;height:24px;border-radius:50%;background:#ffffff22;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;}
+  .role-tag{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;background:#ffffff18;padding:1px 6px;border-radius:4px;}
+
+  .main{flex:1;padding:28px 34px;max-width:1080px;}
+  .page-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;}
+  .page-head h1{font-size:21px;}
+  .page-sub{color:var(--ink-soft);font-size:13px;margin-top:2px;}
+  .live-dot{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--accent);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.03em;}
+  .live-dot::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse 1.6s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+  /* ---- Cards / tables ---- */
+  .grid-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px;}
+  .metric{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;}
+  .metric .label{font-size:12px;color:var(--ink-soft);margin-bottom:4px;}
+  .metric .value{font-family:var(--font-display);font-size:22px;font-weight:600;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:20px;}
+  .card h3{font-size:14px;margin-bottom:14px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{text-align:left;font-weight:500;color:var(--ink-soft);padding:8px 10px;border-bottom:1px solid var(--line);font-size:12px;text-transform:uppercase;letter-spacing:.02em;}
+  tbody td{padding:9px 10px;border-bottom:1px solid var(--line);}
+  tbody tr:last-child td{border-bottom:none;}
+  .tag{font-family:var(--font-mono);font-size:11px;background:var(--surface-2);border:1px dashed var(--line);padding:2px 6px;border-radius:5px;color:var(--ink-soft);}
+  .badge{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500;}
+  .badge-amber{background:var(--amber-soft);color:var(--amber);}
+  .badge-red{background:var(--red-soft);color:var(--red);}
+  .badge-accent{background:var(--accent-soft);color:var(--accent);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+  .row > *{flex:1;min-width:120px;}
+  .field-inline label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:4px;}
+  .field-inline select,.field-inline input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);}
+  .tabs{display:flex;gap:8px;margin-bottom:14px;}
+  .tab-btn{flex:1;padding:8px;border-radius:7px;border:1px solid var(--line);background:var(--surface);font-size:13px;font-weight:500;}
+  .tab-btn.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
+  .draft-item{display:flex;justify-content:space-between;align-items:center;background:var(--surface-2);border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:6px;}
+  .draft-item .meta{color:var(--ink-soft);}
+  .muted{color:var(--ink-soft);font-size:13px;}
+  .success-msg{color:var(--accent);font-size:13px;text-align:center;margin-top:10px;font-weight:500;}
+  .error-msg{color:var(--red);font-size:13px;margin:-6px 0 12px;}
+  .empty-hint{font-size:12px;color:var(--ink-soft);margin-top:4px;}
+  .dropzone{border:1.5px dashed var(--line);border-radius:10px;padding:22px;text-align:center;background:var(--bg);}
+  .dropzone input[type=file]{display:block;margin:0 auto 8px;font-size:13px;}
+  .import-row{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line);font-size:13px;}
+  .import-row:last-child{border-bottom:none;}
+  .spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:6px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  @media(max-width:760px){
+    .shell{flex-direction:column;}
+    .sidebar{width:100%;flex-direction:row;align-items:center;padding:12px 16px;}
+    .sidebar .brand{margin-bottom:0;}
+    .nav-item{padding:8px 10px;}
+    .sidebar-footer{display:none;}
+    .main{padding:20px 18px;}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* ================= capa de API ================= */
+let token = localStorage.getItem('kardex_token') || null;
+let me = JSON.parse(localStorage.getItem('kardex_user') || 'null');
+
+async function api(path, options={}){
+  const headers = {'Content-Type':'application/json'};
+  if(token) headers['Authorization'] = 'Bearer '+token;
+  let res;
+  try{
+    res = await fetch('/api'+path, {...options, headers:{...headers, ...(options.headers||{})}});
+  }catch(e){
+    throw new Error('No se pudo conectar con el servidor. Revisa tu conexión.');
+  }
+  let data = null;
+  try{ data = await res.json(); }catch(e){ /* respuestas 204 sin cuerpo, o el servidor devolvió HTML en vez de JSON */ }
+  if(!res.ok){
+    if(res.status===401 && token){ doLogout(); }
+    throw new Error((data && data.error) || `Ocurrió un error inesperado (código ${res.status}). Es posible que la API no esté corriendo en este servidor.`);
+  }
+  return data;
+}
+function setSession(data){
+  token = data.token; me = data.usuario;
+  localStorage.setItem('kardex_token', token);
+  localStorage.setItem('kardex_user', JSON.stringify(me));
+}
+function doLogout(){
+  token = null; me = null;
+  localStorage.removeItem('kardex_token'); localStorage.removeItem('kardex_user');
+  stopPolling(); view = me && me.rol==='admin' ? 'dashboard' : 'movimiento';
+  render();
+}
+
+/* ================= estado de navegación ================= */
+let view = 'dashboard';
+let pollTimer = null;
+function startPolling(fn, ms){ stopPolling(); pollTimer = setInterval(fn, ms); }
+function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer = null; } }
+
+const unidadLabel = {unidad:'unidades',caja:'caja'};
+function fmtMoney(n){ return 'S/ '+Number(n||0).toFixed(2); }
+function tipoLabel(t){ return t==='despacho'?'Despacho a cliente':t==='abastecimiento'?'Abastecimiento tienda':'Ingreso mercadería'; }
+
+/* ================= render raíz ================= */
+function render(){
+  const app = document.getElementById('app');
+  if(!token){ app.innerHTML = loginView(); bindLogin(); return; }
+  app.innerHTML = shellView();
+  loadPage();
+}
+
+/* ---------- login ---------- */
+let loginTab = 'entrar';
+function loginView(){
+  return `
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="brand">
+        <div class="brand-mark">KX</div>
+        <div><div class="brand-name">Kardex</div><div class="brand-sub">Control de inventario</div></div>
+      </div>
+      <div class="tabs">
+        <button class="tab-btn ${loginTab==='entrar'?'active':''}" id="lt-entrar">Iniciar sesión</button>
+        <button class="tab-btn ${loginTab==='crear'?'active':''}" id="lt-crear">Crear negocio</button>
+      </div>
+      ${loginTab==='entrar' ? `
+      <div class="field"><label>ID de usuario</label><input id="login-id" placeholder="ej: rosa" autocomplete="username"></div>
+      <div class="field"><label>Contraseña</label><input id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+      <p id="login-error" class="error-msg" style="display:none"></p>
+      <button class="btn btn-primary btn-block" id="login-btn">Ingresar</button>
+      <p class="empty-hint">¿Eres almacenero? Pide tu ID y contraseña al admin de tu negocio — se crean desde dentro de Kardex, no aquí.</p>
+      ` : `
+      <div class="field"><label>Nombre del negocio</label><input id="reg-negocio" placeholder="Ej: Vidriería Central"></div>
+      <div class="field"><label>Tu nombre</label><input id="reg-nombre" placeholder="Nombre y apellido"></div>
+      <div class="field"><label>ID de usuario</label><input id="reg-id" placeholder="Sin espacios, ej: jperez" autocomplete="username"></div>
+      <div class="field"><label>Contraseña</label><input id="reg-pass" type="password" placeholder="Mínimo 8 caracteres" autocomplete="new-password"></div>
+      <p id="reg-error" class="error-msg" style="display:none"></p>
+      <button class="btn btn-primary btn-block" id="reg-btn">Crear cuenta de admin</button>
+      <p class="empty-hint">Esto crea tu negocio y tu cuenta de administrador. Una vez dentro, agregas a tus colegas del almacén desde "Usuarios".</p>
+      `}
+    </div>
+  </div>`;
+}
+function bindLogin(){
+  document.getElementById('lt-entrar').onclick = ()=>{ loginTab='entrar'; render(); };
+  document.getElementById('lt-crear').onclick = ()=>{ loginTab='crear'; render(); };
+
+  if(loginTab==='entrar'){
+    document.getElementById('login-btn').onclick = async ()=>{
+      const usuario = document.getElementById('login-id').value.trim();
+      const password = document.getElementById('login-pass').value;
+      const err = document.getElementById('login-error');
+      const btn = document.getElementById('login-btn');
+      err.style.display='none'; btn.disabled = true; btn.textContent='Ingresando…';
+      try{
+        const data = await api('/auth/login', {method:'POST', body:JSON.stringify({usuario,password})});
+        setSession(data);
+        view = me.rol==='admin' ? 'dashboard' : 'movimiento';
+        render();
+      }catch(e){ err.textContent = e.message; err.style.display='block'; }
+      finally{ btn.disabled=false; btn.textContent='Ingresar'; }
+    };
+  } else {
+    document.getElementById('reg-btn').onclick = async ()=>{
+      const nombreNegocio = document.getElementById('reg-negocio').value.trim();
+      const nombreAdmin = document.getElementById('reg-nombre').value.trim();
+      const usuario = document.getElementById('reg-id').value.trim();
+      const password = document.getElementById('reg-pass').value;
+      const err = document.getElementById('reg-error');
+      const btn = document.getElementById('reg-btn');
+      err.style.display='none'; btn.disabled = true; btn.textContent='Creando…';
+      try{
+        const data = await api('/auth/registro', {method:'POST', body:JSON.stringify({nombreNegocio,nombreAdmin,usuario,password})});
+        setSession(data);
+        loginTab = 'entrar'; view = 'dashboard';
+        render();
+      }catch(e){ err.textContent = e.message; err.style.display='block'; }
+      finally{ btn.disabled=false; btn.textContent='Crear cuenta de admin'; }
+    };
+  }
+}
+
+/* ---------- shell ---------- */
+function shellView(){
+  const isAdmin = me.rol==='admin';
+  const nav = isAdmin
+    ? [['dashboard','Dashboard'],['catalogo','Catálogo'],['usuarios','Usuarios'],['reportes','Reportes']]
+    : [['movimiento','Nuevo movimiento'],['ingreso','Ingreso de mercadería']];
+  const navHtml = nav.map(([id,label])=>`<div class="nav-item ${view===id?'active':''}" data-view="${id}">${label}</div>`).join('');
+  const initials = me.nombre.split(' ').map(s=>s[0]).slice(0,2).join('');
+  return `
+  <div class="shell">
+    <div class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">KX</div>
+        <div><div class="brand-name">Kardex</div><div class="brand-sub">Control de inventario</div></div>
+      </div>
+      <div>${navHtml}</div>
+      <div class="sidebar-footer">
+        <div class="user-chip"><div class="user-dot">${initials}</div><div>${me.nombre}<br><span class="role-tag">${me.rol}</span></div></div>
+        <button class="btn btn-block" id="logout-btn">Cerrar sesión</button>
+      </div>
+    </div>
+    <div class="main" id="main-content"><p class="muted"><span class="spinner"></span>Cargando…</p></div>
+  </div>`;
+}
+
+/* ---------- router de contenido ---------- */
+async function loadPage(){
+  document.querySelectorAll('.nav-item').forEach(el=>{ el.onclick = ()=>{ view = el.dataset.view; loadPage(); document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===view)); }; });
+  document.getElementById('logout-btn').onclick = doLogout;
+  stopPolling();
+  const main = document.getElementById('main-content');
+  main.innerHTML = '<p class="muted"><span class="spinner"></span>Cargando…</p>';
+  try{
+    if(view==='dashboard') await loadDashboard();
+    else if(view==='catalogo') await loadCatalogo();
+    else if(view==='usuarios') await loadUsuarios();
+    else if(view==='reportes') await loadReportes();
+    else if(view==='movimiento') await loadMovimiento();
+    else if(view==='ingreso') await loadIngreso();
+  }catch(err){
+    main.innerHTML = `<div class="card"><p class="error-msg" style="margin:0">${err.message}</p></div>`;
+  }
+}
+
+/* ---------- dashboard (con auto-actualización) ---------- */
+async function loadDashboard(){
+  await refreshDashboard();
+  startPolling(refreshDashboard, 6000);
+}
+async function refreshDashboard(){
+  const [productos, usuarios, movimientos] = await Promise.all([api('/productos'), api('/usuarios'), api('/movimientos')]);
+  const hoy = new Date().toISOString().slice(0,10);
+  const movHoy = movimientos.filter(m=>m.fecha && m.fecha.slice(0,10)===hoy).length;
+  const stockBajo = productos.filter(p=>p.stock_actual<15).length;
+  const rows = movimientos.slice(0,6).map(m=>`
+    <tr><td>${m.fecha}</td><td>${m.producto}</td><td>${tipoLabel(m.tipo)}</td>
+    <td style="text-align:right">${m.cantidad} ${unidadLabel[m.unidad]}</td><td>${m.usuario}</td>
+    <td>${m.observacion_merma?`<span class="badge badge-amber">Merma</span>`:'<span class="muted">—</span>'}</td></tr>`).join('') ||
+    `<tr><td colspan="6" class="muted" style="padding:16px;text-align:center">Aún no hay movimientos registrados.</td></tr>`;
+  document.getElementById('main-content').innerHTML = `
+  <div class="page-head"><div><h1>Dashboard</h1><div class="page-sub">Resumen general del inventario</div></div><span class="live-dot">En vivo</span></div>
+  <div class="grid-metrics">
+    <div class="metric"><div class="label">Productos activos</div><div class="value">${productos.length}</div></div>
+    <div class="metric"><div class="label">Movimientos hoy</div><div class="value">${movHoy}</div></div>
+    <div class="metric"><div class="label">Almaceneros</div><div class="value">${usuarios.filter(u=>u.rol==='almacenero').length} / 5</div></div>
+    <div class="metric"><div class="label">Ítems con stock bajo</div><div class="value" style="color:var(--amber)">${stockBajo}</div></div>
+  </div>
+  <div class="card"><h3>Últimos movimientos</h3>
+    <table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th style="text-align:right">Cant.</th><th>Usuario</th><th>Merma</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+  </div>`;
+}
+
+/* ---------- catálogo ---------- */
+async function loadCatalogo(){
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+  <div class="page-head"><div><h1>Catálogo</h1><div class="page-sub">Productos, precios y stock</div></div><span class="live-dot">En vivo</span></div>
+  <div class="card"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Unidad</th><th style="text-align:right">Precio</th><th style="text-align:right">Stock</th><th></th></tr></thead>
+    <tbody id="cat-body"><tr><td colspan="6" class="muted" style="padding:14px;text-align:center">Cargando…</td></tr></tbody></table>
+  </div>
+  <div class="card">
+    <h3>Importar catálogo desde archivo</h3>
+    <p class="page-sub" style="margin-bottom:12px">Sube un Excel (.xlsx), CSV o PDF con columnas como <span class="tag">nombre</span> <span class="tag">categoría</span> <span class="tag">unidad</span> <span class="tag">precio</span> <span class="tag">stock</span>. Si un producto ya existe (mismo SKU o nombre), se actualiza; si no, se crea.</p>
+    <div class="dropzone">
+      <input type="file" id="imp-file" accept=".xlsx,.xls,.csv,.pdf">
+      <p class="empty-hint" id="imp-status">Selecciona un archivo para ver la vista previa antes de importar.</p>
+    </div>
+    <div id="imp-preview"></div>
+  </div>
+  <div class="card">
+    <h3>Agregar producto</h3>
+    <div class="row">
+      <div class="field-inline"><label>Nombre</label><input id="c-nombre" placeholder="Nombre del producto"></div>
+      <div class="field-inline"><label>Categoría</label>
+        <select id="c-categoria"><option>Loza</option><option>Vidrio</option><option>Acero</option><option>Madera</option><option>Otros</option></select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field-inline"><label>Unidad</label>
+        <select id="c-unidad"><option value="unidad">Por unidades</option><option value="caja">Por caja</option></select>
+      </div>
+      <div class="field-inline"><label>Precio</label><input id="c-precio" type="number" min="0" step="0.1" placeholder="0.00"></div>
+      <div class="field-inline"><label>Stock inicial</label><input id="c-stock" type="number" min="0" placeholder="0"></div>
+    </div>
+    <p id="c-error" class="error-msg" style="display:none"></p>
+    <button class="btn btn-primary" id="c-add">Guardar producto</button>
+  </div>`;
+
+  document.getElementById('c-add').onclick = async ()=>{
+    const nombre = document.getElementById('c-nombre').value.trim();
+    const err = document.getElementById('c-error');
+    err.style.display='none';
+    if(!nombre) return;
+    try{
+      await api('/productos', {method:'POST', body:JSON.stringify({
+        nombre, categoria:document.getElementById('c-categoria').value,
+        unidad:document.getElementById('c-unidad').value,
+        precio:parseFloat(document.getElementById('c-precio').value)||0,
+        stockInicial:parseInt(document.getElementById('c-stock').value)||0
+      })});
+      document.getElementById('c-nombre').value='';
+      document.getElementById('c-precio').value='';
+      document.getElementById('c-stock').value='';
+      await refreshCatalogoTable();
+    }catch(e){ err.textContent = e.message; err.style.display='block'; }
+  };
+  document.getElementById('imp-file').onchange = async (e)=>{
+    const file = e.target.files[0];
+    const status = document.getElementById('imp-status');
+    if(!file) return;
+    status.innerHTML = `<span class="spinner"></span>Leyendo ${file.name}…`;
+    document.getElementById('imp-preview').innerHTML = '';
+    try{
+      const rows = await parseFileToRows(file);
+      if(rows.length===0){
+        status.textContent = 'No se encontraron filas reconocibles. Revisa que el archivo tenga encabezados como nombre, unidad, precio, stock.';
+        return;
+      }
+      status.textContent = `${file.name} — ${rows.length} filas detectadas.`;
+      renderImportPreview(rows);
+    }catch(err){ status.textContent = 'No se pudo leer el archivo: '+err.message; }
+  };
+
+  await refreshCatalogoTable();
+  startPolling(refreshCatalogoTable, 6000);
+}
+async function refreshCatalogoTable(){
+  const productos = await api('/productos');
+  window.__ultimosProductos = productos;
+  const body = document.getElementById('cat-body');
+  if(!body) return;
+  body.innerHTML = productos.map(p=>`
+    <tr><td style="font-weight:500">${p.nombre} <span class="tag">${p.sku||'—'}</span></td><td>${p.categoria||'—'}</td>
+    <td>${unidadLabel[p.unidad]}</td><td style="text-align:right">${fmtMoney(p.precio)}</td>
+    <td style="text-align:right;${p.stock_actual<15?'color:var(--amber);font-weight:500':''}">${p.stock_actual}</td>
+    <td style="text-align:right"><button class="btn btn-ghost btn-danger" data-del="${p.id}">Eliminar</button></td></tr>`).join('') ||
+    `<tr><td colspan="6" class="muted" style="padding:14px;text-align:center">Aún no hay productos en el catálogo.</td></tr>`;
+  body.querySelectorAll('[data-del]').forEach(b=>{
+    b.onclick = async ()=>{ await api('/productos/'+b.dataset.del, {method:'DELETE'}); await refreshCatalogoTable(); };
+  });
+}
+
+/* ---------- importación de archivos (Excel / CSV / PDF) ---------- */
+const HEADER_MAP = {
+  nombre:['nombre','producto','item','articulo','descripcion'],
+  categoria:['categoria','rubro','familia'],
+  unidad:['unidad','medida','tipo de unidad','unidad de medida'],
+  precio:['precio','precio unitario','pvp','precio venta'],
+  stock:['stock','cantidad','stock actual','existencia','existencias'],
+  sku:['sku','codigo','cod']
+};
+function normalizeKey(k){ return String(k).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim(); }
+function normalizeUnidad(v){
+  const nk = normalizeKey(v);
+  return ['caja','cajas','box','caj'].includes(nk) ? 'caja' : 'unidad';
+}
+function mapRowObject(row){
+  const out = {nombre:'',categoria:'',unidad:'',precio:0,stock:0,sku:''};
+  Object.keys(row).forEach(k=>{
+    const nk = normalizeKey(k);
+    Object.keys(HEADER_MAP).forEach(field=>{ if(HEADER_MAP[field].includes(nk) && row[k]!=='') out[field]=row[k]; });
+  });
+  return {
+    nombre:String(out.nombre).trim(), categoria:String(out.categoria).trim()||'General',
+    unidad:normalizeUnidad(out.unidad), precio:parseFloat(out.precio)||0,
+    stock:parseInt(out.stock)||0, sku:String(out.sku).trim()
+  };
+}
+function parseSheetToRows(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      try{
+        const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
+        const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''});
+        resolve(json.map(mapRowObject).filter(r=>r.nombre));
+      }catch(err){ reject(err); }
+    };
+    reader.onerror = ()=>reject(new Error('No se pudo leer el archivo.'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+async function parsePdfToRows(file){
+  if(!window.pdfjsLib) throw new Error('El lector de PDF no cargó, revisa tu conexión a internet.');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+  let lines = [];
+  for(let i=1;i<=pdf.numPages;i++){
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const porFila = {};
+    content.items.forEach(it=>{ const y = Math.round(it.transform[5]); (porFila[y]=porFila[y]||[]).push(it.str); });
+    Object.keys(porFila).sort((a,b)=>b-a).forEach(y=>{ lines.push(porFila[y].join(' ').replace(/\s{2,}/g,'|').trim()); });
+  }
+  lines = lines.filter(l=>l.length>0);
+  if(lines.length<2) return [];
+  const header = lines[0].split('|').map(s=>s.trim());
+  const rows = [];
+  for(let i=1;i<lines.length;i++){
+    const cells = lines[i].split('|').map(s=>s.trim());
+    const obj = {}; header.forEach((h,idx)=>{ obj[h]=cells[idx]||''; });
+    rows.push(mapRowObject(obj));
+  }
+  return rows.filter(r=>r.nombre);
+}
+function parseFileToRows(file){
+  const ext = file.name.split('.').pop().toLowerCase();
+  return ext==='pdf' ? parsePdfToRows(file) : parseSheetToRows(file);
+}
+function renderImportPreview(rows){
+  const cont = document.getElementById('imp-preview');
+  const existentes = window.__ultimosProductos || [];
+  const existe = r => r.sku ? existentes.find(p=>p.sku && p.sku.toLowerCase()===r.sku.toLowerCase())
+                             : existentes.find(p=>p.nombre.toLowerCase()===r.nombre.toLowerCase());
+  const nuevos = rows.filter(r=>!existe(r)).length;
+  const actualizados = rows.length - nuevos;
+  const listRows = rows.slice(0,50).map(r=>`
+    <div class="import-row"><div><strong>${r.nombre}</strong> <span class="muted">${r.categoria} · ${unidadLabel[r.unidad]} · ${fmtMoney(r.precio)} · stock ${r.stock}</span></div>
+    <span class="badge ${existe(r)?'badge-accent':'badge-amber'}">${existe(r)?'actualizar':'nuevo'}</span></div>`).join('');
+  cont.innerHTML = `
+    <div class="card" style="background:var(--bg);border-style:dashed;margin-top:14px;margin-bottom:0">
+      <h3>Vista previa — ${rows.length} filas (${nuevos} nuevas, ${actualizados} actualizadas)</h3>
+      <div style="max-height:280px;overflow:auto">${listRows}</div>
+      ${rows.length>50?`<p class="empty-hint">Mostrando las primeras 50 de ${rows.length} filas.</p>`:''}
+    </div>
+    <button class="btn btn-primary btn-block" id="imp-confirm" style="margin-top:14px">Confirmar importación (${rows.length} productos)</button>
+    <p class="success-msg" id="imp-msg" style="display:none"></p>`;
+  document.getElementById('imp-confirm').onclick = async ()=>{
+    const btn = document.getElementById('imp-confirm');
+    btn.disabled = true; btn.textContent = 'Importando…';
+    try{
+      const data = await api('/productos/importar', {method:'POST', body:JSON.stringify({items:rows})});
+      const msg = document.getElementById('imp-msg');
+      msg.style.display='block';
+      msg.textContent = `Listo: ${data.creados} productos creados, ${data.actualizados} actualizados.`;
+      await refreshCatalogoTable();
+    }catch(e){
+      const msg = document.getElementById('imp-msg');
+      msg.style.display='block'; msg.style.color='var(--red)'; msg.textContent = e.message;
+      btn.disabled=false; btn.textContent = `Confirmar importación (${rows.length} productos)`;
+    }
+  };
+}
+
+/* ---------- usuarios ---------- */
+async function loadUsuarios(){
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+  <div class="page-head"><div><h1>Usuarios</h1><div class="page-sub" id="u-sub">Cargando…</div></div><span class="live-dot">En vivo</span></div>
+  <div class="card"><table><thead><tr><th>Nombre</th><th>ID de usuario</th><th>Rol</th><th></th></tr></thead>
+    <tbody id="u-body"></tbody></table></div>
+  <div class="card" id="u-form-card"></div>`;
+  await refreshUsuarios();
+  startPolling(refreshUsuarios, 6000);
+}
+async function refreshUsuarios(){
+  const usuarios = await api('/usuarios');
+  const almaceneros = usuarios.filter(u=>u.rol==='almacenero');
+  document.getElementById('u-sub').textContent = `${almaceneros.length} de 5 almaceneros creados`;
+  document.getElementById('u-body').innerHTML = usuarios.map(u=>`
+    <tr><td style="font-weight:500">${u.nombre}</td><td><span class="tag">${u.usuario}</span></td>
+    <td><span class="badge ${u.rol==='admin'?'badge-accent':''}">${u.rol}</span></td>
+    <td style="text-align:right">${u.rol==='almacenero'?`<button class="btn btn-ghost btn-danger" data-del="${u.id}">Eliminar</button>`:''}</td></tr>`).join('');
+  document.querySelectorAll('#u-body [data-del]').forEach(b=>{
+    b.onclick = async ()=>{ await api('/usuarios/'+b.dataset.del, {method:'DELETE'}); await refreshUsuarios(); };
+  });
+  const limite = almaceneros.length>=5;
+  const formCard = document.getElementById('u-form-card');
+  formCard.innerHTML = `
+    <h3>Agregar almacenero</h3>
+    ${limite ? `<p class="muted">Ya alcanzaste el máximo de 5 almaceneros para esta cuenta.</p>` : `
+    <div class="row">
+      <div class="field-inline"><label>Nombre</label><input id="u-nombre" placeholder="Nombre completo"></div>
+      <div class="field-inline"><label>ID de usuario</label><input id="u-id" placeholder="Sin espacios, ej: jperez"></div>
+    </div>
+    <div class="row"><div class="field-inline"><label>Contraseña</label><input id="u-pass" type="password" placeholder="Mínimo 8 caracteres"></div></div>
+    <p id="u-error" class="error-msg" style="display:none"></p>
+    <button class="btn btn-primary" id="u-add">Crear usuario</button>
+    <p class="empty-hint">Comparte este ID y contraseña con tu colega del almacén de forma segura (no por un canal público).</p>`}`;
+  if(!limite){
+    document.getElementById('u-add').onclick = async ()=>{
+      const nombre = document.getElementById('u-nombre').value.trim();
+      const usuario = document.getElementById('u-id').value.trim();
+      const password = document.getElementById('u-pass').value;
+      const err = document.getElementById('u-error');
+      err.style.display='none';
+      try{
+        await api('/usuarios', {method:'POST', body:JSON.stringify({nombre, usuario, password})});
+        await refreshUsuarios();
+      }catch(e){ err.textContent = e.message; err.style.display='block'; }
+    };
+  }
+}
+
+/* ---------- reportes ---------- */
+async function loadReportes(){
+  const usuarios = await api('/usuarios');
+  const almaceneros = usuarios.filter(u=>u.rol==='almacenero');
+  document.getElementById('main-content').innerHTML = `
+  <div class="page-head"><div><h1>Reportes</h1><div class="page-sub">Historial de movimientos de stock</div></div><span class="live-dot">En vivo</span></div>
+  <div class="row">
+    <div class="field-inline"><label>Tipo</label>
+      <select id="r-tipo"><option value="">Todos</option><option value="despacho">Despacho</option><option value="abastecimiento">Abastecimiento</option><option value="ingreso">Ingreso</option></select>
+    </div>
+    <div class="field-inline"><label>Usuario</label>
+      <select id="r-usuario"><option value="">Todos</option>${almaceneros.map(u=>`<option value="${u.id}">${u.nombre}</option>`).join('')}</select>
+    </div>
+    <div class="field-inline"><label>Merma</label>
+      <select id="r-merma"><option value="">Con y sin merma</option><option value="true">Solo con merma</option></select>
+    </div>
+  </div>
+  <div class="card"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th style="text-align:right">Cant.</th><th>Usuario</th><th>Merma</th></tr></thead>
+  <tbody id="rep-body"></tbody></table></div>`;
+  const refresh = async ()=>{
+    const params = new URLSearchParams();
+    const tipo = document.getElementById('r-tipo').value;
+    const usuarioId = document.getElementById('r-usuario').value;
+    const soloMerma = document.getElementById('r-merma').value;
+    if(tipo) params.set('tipo', tipo);
+    if(usuarioId) params.set('usuarioId', usuarioId);
+    if(soloMerma) params.set('soloMerma', soloMerma);
+    const rows = await api('/movimientos?'+params.toString());
+    document.getElementById('rep-body').innerHTML = rows.map(m=>`
+      <tr><td>${m.fecha}</td><td>${m.producto}</td><td>${tipoLabel(m.tipo)}</td>
+      <td style="text-align:right">${m.cantidad} ${unidadLabel[m.unidad]}</td><td>${m.usuario}</td>
+      <td>${m.observacion_merma?`<span class="badge badge-amber">${m.observacion_merma}</span>`:'<span class="muted">—</span>'}</td></tr>`).join('') ||
+      `<tr><td colspan="6" class="muted" style="padding:16px;text-align:center">Sin resultados para este filtro.</td></tr>`;
+  };
+  ['r-tipo','r-usuario','r-merma'].forEach(id=>document.getElementById(id).addEventListener('change', refresh));
+  await refresh();
+  startPolling(refresh, 6000);
+}
+
+/* ---------- nuevo movimiento (salida) ---------- */
+let draftMov = [];
+async function loadMovimiento(){
+  draftMov = [];
+  const productos = await api('/productos');
+  const opts = productos.map(p=>`<option value="${p.id}">${p.nombre} (${p.stock_actual} ${unidadLabel[p.unidad]} disp.)</option>`).join('');
+  document.getElementById('main-content').innerHTML = `
+  <div class="page-head"><div><h1>Nuevo movimiento</h1><div class="page-sub">Despacho a cliente o abastecimiento de tienda</div></div></div>
+  <div class="card" style="max-width:480px">
+    <div class="field-inline" style="margin-bottom:12px"><label>Tipo de movimiento</label>
+      <select id="m-tipo"><option value="despacho">Despacho a cliente</option><option value="abastecimiento">Abastecimiento tienda principal</option></select>
+    </div>
+    <div class="row">
+      <div class="field-inline" style="flex:2"><label>Producto</label><select id="m-producto">${opts}</select></div>
+      <div class="field-inline"><label>Cantidad</label><input id="m-cantidad" type="number" min="1" value="1"></div>
+    </div>
+    <div class="field-inline" style="margin-bottom:12px"><label>Observación de merma (opcional)</label><input id="m-merma" placeholder="2 unidades rotas en la caja"></div>
+    <button class="btn btn-block" id="m-add">+ Agregar ítem</button>
+    <div class="card" style="background:var(--bg);border-style:dashed;margin-top:16px;margin-bottom:0"><h3>Ítems del movimiento</h3><div id="m-lista"><p class="muted">Aún no agregaste ítems.</p></div></div>
+    <p id="m-error" class="error-msg" style="display:none"></p>
+    <button class="btn btn-primary btn-block" id="m-confirm" style="margin-top:14px">✓ Confirmar movimiento</button>
+    <p class="success-msg" id="m-msg" style="display:none">Movimiento registrado. Stock actualizado.</p>
+  </div>`;
+  const opciones = {}; productos.forEach(p=>opciones[p.id]=p);
+  function renderDraft(){
+    const cont = document.getElementById('m-lista');
+    cont.innerHTML = draftMov.length===0 ? `<p class="muted">Aún no agregaste ítems.</p>` :
+      draftMov.map((it,i)=>{
+        const p = opciones[it.productoId];
+        return `<div class="draft-item"><div><strong>${p.nombre}</strong> <span class="meta">× ${it.cantidad} ${unidadLabel[p.unidad]}</span>
+        ${it.observacionMerma?`<div class="badge badge-amber" style="margin-top:4px;display:inline-block">${it.observacionMerma}</div>`:''}</div>
+        <button class="btn btn-ghost" data-rm="${i}">✕</button></div>`;
+      }).join('');
+    cont.querySelectorAll('[data-rm]').forEach(b=>{ b.onclick = ()=>{ draftMov.splice(parseInt(b.dataset.rm),1); renderDraft(); }; });
+  }
+  document.getElementById('m-add').onclick = ()=>{
+    const productoId = document.getElementById('m-producto').value;
+    const cantidad = Math.max(1, parseInt(document.getElementById('m-cantidad').value)||1);
+    const observacionMerma = document.getElementById('m-merma').value.trim();
+    draftMov.push({productoId, cantidad, observacionMerma});
+    document.getElementById('m-merma').value='';
+    document.getElementById('m-msg').style.display='none';
+    renderDraft();
+  };
+  document.getElementById('m-confirm').onclick = async ()=>{
+    if(draftMov.length===0) return;
+    const err = document.getElementById('m-error');
+    err.style.display='none';
+    try{
+      await api('/movimientos/salida', {method:'POST', body:JSON.stringify({tipo:document.getElementById('m-tipo').value, items:draftMov})});
+      draftMov = [];
+      document.getElementById('m-msg').style.display='block';
+      renderDraft();
+    }catch(e){ err.textContent = e.message; err.style.display='block'; }
+  };
+  renderDraft();
+}
+
+/* ---------- ingreso de mercadería (entrada) ---------- */
+let draftIng = [];
+async function loadIngreso(){
+  draftIng = [];
+  const productos = await api('/productos');
+  const opciones = {}; productos.forEach(p=>opciones[p.id]=p);
+  const opts = productos.map(p=>`<option value="${p.id}">${p.nombre} (${unidadLabel[p.unidad]})</option>`).join('');
+  document.getElementById('main-content').innerHTML = `
+  <div class="page-head"><div><h1>Ingreso de mercadería</h1><div class="page-sub">Suma stock nuevo al inventario</div></div></div>
+  <div class="card" style="max-width:480px">
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-existente">Producto existente</button>
+      <button class="tab-btn" id="tab-nuevo">Producto nuevo</button>
+    </div>
+    <div id="panel-existente"><div class="field-inline" style="margin-bottom:12px"><label>Producto</label><select id="i-producto">${opts}</select></div></div>
+    <div id="panel-nuevo" style="display:none">
+      <div class="row">
+        <div class="field-inline" style="flex:2"><label>Nombre del producto</label><input id="i-nombre" placeholder="Nombre"></div>
+        <div class="field-inline"><label>Unidad</label><select id="i-unidad"><option value="unidad">Unidades</option><option value="caja">Caja</option></select></div>
+      </div>
+      <p class="empty-hint" style="margin-bottom:12px">Se agregará al catálogo junto con este ingreso (podrás completar precio y categoría después, en Catálogo).</p>
+    </div>
+    <div class="field-inline" style="margin-bottom:12px"><label>Cantidad ingresada</label><input id="i-cantidad" type="number" min="1" value="10"></div>
+    <button class="btn btn-block" id="i-add">+ Agregar a la carga</button>
+    <div class="card" style="background:var(--bg);border-style:dashed;margin-top:16px;margin-bottom:0"><h3>Carga de ingreso</h3><div id="i-lista"><p class="muted">Aún no agregaste ítems a esta carga.</p></div></div>
+    <p id="i-error" class="error-msg" style="display:none"></p>
+    <button class="btn btn-primary btn-block" id="i-confirm" style="margin-top:14px">✓ Confirmar ingreso</button>
+    <p class="success-msg" id="i-msg" style="display:none">Mercadería ingresada. Stock actualizado.</p>
+  </div>`;
+
+  const tabE = document.getElementById('tab-existente'), tabN = document.getElementById('tab-nuevo');
+  tabE.onclick = ()=>{ tabE.classList.add('active'); tabN.classList.remove('active'); document.getElementById('panel-existente').style.display='block'; document.getElementById('panel-nuevo').style.display='none'; };
+  tabN.onclick = ()=>{ tabN.classList.add('active'); tabE.classList.remove('active'); document.getElementById('panel-nuevo').style.display='block'; document.getElementById('panel-existente').style.display='none'; };
+
+  function renderDraft(){
+    const cont = document.getElementById('i-lista');
+    cont.innerHTML = draftIng.length===0 ? `<p class="muted">Aún no agregaste ítems a esta carga.</p>` :
+      draftIng.map((it,i)=>{
+        const nombre = it.productoNuevo ? it.productoNuevo.nombre : opciones[it.productoId].nombre;
+        const unidad = it.productoNuevo ? it.productoNuevo.unidad : opciones[it.productoId].unidad;
+        return `<div class="draft-item"><div><strong>${nombre}</strong> <span class="meta">· ${it.cantidad} ${unidadLabel[unidad]}${it.productoNuevo?' <span class="badge badge-accent">nuevo</span>':''}</span></div>
+        <button class="btn btn-ghost" data-rmi="${i}">✕</button></div>`;
+      }).join('');
+    cont.querySelectorAll('[data-rmi]').forEach(b=>{ b.onclick = ()=>{ draftIng.splice(parseInt(b.dataset.rmi),1); renderDraft(); }; });
+  }
+  document.getElementById('i-add').onclick = ()=>{
+    const esNuevo = document.getElementById('panel-nuevo').style.display!=='none';
+    const cantidad = Math.max(1, parseInt(document.getElementById('i-cantidad').value)||1);
+    if(esNuevo){
+      const nombre = document.getElementById('i-nombre').value.trim();
+      if(!nombre) return;
+      draftIng.push({productoNuevo:{nombre, unidad:document.getElementById('i-unidad').value}, cantidad});
+      document.getElementById('i-nombre').value='';
+    } else {
+      draftIng.push({productoId:document.getElementById('i-producto').value, cantidad});
+    }
+    document.getElementById('i-msg').style.display='none';
+    renderDraft();
+  };
+  document.getElementById('i-confirm').onclick = async ()=>{
+    if(draftIng.length===0) return;
+    const err = document.getElementById('i-error');
+    err.style.display='none';
+    try{
+      await api('/movimientos/ingreso', {method:'POST', body:JSON.stringify({items:draftIng})});
+      draftIng = [];
+      document.getElementById('i-msg').style.display='block';
+      renderDraft();
+    }catch(e){ err.textContent = e.message; err.style.display='block'; }
+  };
+  renderDraft();
+}
+
+render();
+</script>
+</body>
+</html>
