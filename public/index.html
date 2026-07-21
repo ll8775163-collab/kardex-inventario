@@ -539,6 +539,9 @@ async function refreshUsuarios(){
   });
   const limite = almaceneros.length>=5;
   const formCard = document.getElementById('u-form-card');
+  const activo = document.activeElement;
+  const escribiendoEnForm = formCard.contains(activo) && activo.tagName==='INPUT';
+  if(escribiendoEnForm) return; // no reconstruir el formulario mientras el usuario está escribiendo en él
   formCard.innerHTML = `
     <h3>Agregar almacenero</h3>
     ${limite ? `<p class="muted">Ya alcanzaste el máximo de 5 almaceneros para esta cuenta.</p>` : `
