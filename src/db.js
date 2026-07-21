@@ -32,7 +32,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS productos (
     id TEXT PRIMARY KEY,
     cliente_id TEXT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-    sku TEXT NOT NULL,
+    sku TEXT,
     nombre TEXT NOT NULL,
     categoria TEXT,
     unidad TEXT NOT NULL CHECK (unidad IN ('unidad','caja')),
