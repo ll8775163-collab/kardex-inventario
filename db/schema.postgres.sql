@@ -29,7 +29,7 @@ CREATE TABLE usuarios (
 CREATE TABLE productos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   cliente_id UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-  sku TEXT NOT NULL,
+  sku TEXT,
   nombre TEXT NOT NULL,
   categoria TEXT,
   unidad TEXT NOT NULL CHECK (unidad IN ('unidad', 'caja')),
