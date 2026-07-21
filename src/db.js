@@ -12,57 +12,28 @@ const db = new Database(path.join(__dirname, '..', 'kardex.db'));
 db.pragma('foreign_keys = ON');
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS clientes (
-    id TEXT PRIMARY KEY,
-    nombre_negocio TEXT NOT NULL,
-    plan TEXT NOT NULL DEFAULT 'basico',
-    creado_en TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS usuarios (
-    id TEXT PRIMARY KEY,
-    cliente_id TEXT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-    nombre TEXT NOT NULL,
-    usuario TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    rol TEXT NOT NULL CHECK (rol IN ('admin','almacenero')),
-    creado_en TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS productos (
-    id TEXT PRIMARY KEY,
-    cliente_id TEXT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-    sku TEXT,
-    nombre TEXT NOT NULL,
-    categoria TEXT,
-    unidad TEXT NOT NULL CHECK (unidad IN ('unidad','caja')),
-    precio REAL NOT NULL DEFAULT 0,
-    stock_actual INTEGER NOT NULL DEFAULT 0,
-    creado_en TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(cliente_id, sku)
-  );
-
-  CREATE TABLE IF NOT EXISTS movimientos (
-    id TEXT PRIMARY KEY,
-    cliente_id TEXT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-    usuario_id TEXT NOT NULL REFERENCES usuarios(id),
-    tipo TEXT NOT NULL CHECK (tipo IN ('despacho','abastecimiento','ingreso')),
-    fecha TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS movimiento_items (
-    id TEXT PRIMARY KEY,
-    movimiento_id TEXT NOT NULL REFERENCES movimientos(id) ON DELETE CASCADE,
-    producto_id TEXT NOT NULL REFERENCES productos(id),
-    cantidad INTEGER NOT NULL CHECK (cantidad > 0),
-    observacion_merma TEXT
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_usuarios_cliente ON usuarios(cliente_id);
-  CREATE INDEX IF NOT EXISTS idx_productos_cliente ON productos(cliente_id);
-  CREATE INDEX IF NOT EXISTS idx_movimientos_cliente ON movimientos(cliente_id);
-`);
-
+// --- Migración: si "productos" ya existía con sku NOT NULL (versión anterior),
+// la recreamos permitiendo sku nulo, sin perder los datos.
+const skuInfo = db.prepare("PRAGMA table_info(productos)").all().find((c) => c.name === 'sku');
+if (skuInfo && skuInfo.notnull) {
+  db.exec(`
+    ALTER TABLE productos RENAME TO productos_old;
+    CREATE TABLE productos (
+      id TEXT PRIMARY KEY,
+      cliente_id TEXT NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+      sku TEXT,
+      nombre TEXT NOT NULL,
+      categoria TEXT,
+      unidad TEXT NOT NULL CHECK (unidad IN ('unidad','caja')),
+      precio REAL NOT NULL DEFAULT 0,
+      stock_actual INTEGER NOT NULL DEFAULT 0,
+      creado_en TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(cliente_id, sku)
+    );
+    INSERT INTO productos SELECT * FROM productos_old;
+    DROP TABLE productos_old;
+  `);
+}
 function newId() {
   return crypto.randomUUID();
 }
