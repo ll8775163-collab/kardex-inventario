@@ -2,6 +2,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const { init } = require('./db');
 
 const app = express();
 app.use(cors());
@@ -40,4 +41,15 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Kardex backend escuchando en http://localhost:${PORT}`));
+
+// Crea las tablas en Postgres (si no existen) antes de aceptar peticiones.
+// Si la conexión a la base falla (ej. DATABASE_URL mal configurada), el
+// servidor no arranca — mejor eso a que arranque y falle en cada request.
+init()
+  .then(() => {
+    app.listen(PORT, () => console.log(`Kardex backend escuchando en http://localhost:${PORT}`));
+  })
+  .catch((err) => {
+    console.error('No se pudo inicializar la base de datos:', err);
+    process.exit(1);
+  });
